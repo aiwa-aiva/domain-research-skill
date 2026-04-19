@@ -292,8 +292,49 @@ def main():
     print(f"[OK] HTML 已生成: {html_path}")
 
     # 转 PDF
-    from weasyprint import HTML
-    HTML(string=html).write_pdf(args.output)
+    # 优先尝试 WeasyPrint，失败则自动 fallback 到 Chrome headless
+    pdf_ok = False
+
+    try:
+        from weasyprint import HTML
+        HTML(string=html).write_pdf(args.output)
+        pdf_ok = True
+        print("[OK] PDF 引擎: WeasyPrint")
+    except Exception as e:
+        print(f"[WARN] WeasyPrint 不可用 ({e})，尝试 Chrome headless fallback...")
+
+    if not pdf_ok:
+        # Chrome headless fallback
+        # 注意：必须使用 --no-pdf-header-footer（Chrome 112+ 的正确参数）
+        # 旧参数 --print-to-pdf-no-header 在新版 Chrome 中已失效，会导致首页出现时间戳和文件路径
+        import shutil, subprocess, urllib.parse
+        chrome_candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            shutil.which("google-chrome") or "",
+            shutil.which("chromium") or "",
+        ]
+        chrome_bin = next((c for c in chrome_candidates if c and os.path.exists(c)), None)
+        if not chrome_bin:
+            raise RuntimeError("WeasyPrint 不可用，且找不到 Chrome/Chromium，无法生成 PDF。")
+
+        # 将 HTML 路径转为 file:// URL（需要 URL 编码中文路径）
+        html_url = "file://" + urllib.parse.quote(html_path)
+        cmd = [
+            chrome_bin,
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            f"--print-to-pdf={args.output}",
+            "--no-pdf-header-footer",   # 去除 Chrome 默认的时间戳/文件路径/页码页眉页脚
+                                        # ⚠️  不要用 --print-to-pdf-no-header，该参数在 Chrome 112+ 已失效
+            html_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not os.path.exists(args.output):
+            raise RuntimeError(f"Chrome headless 转换失败:\n{result.stderr}")
+        print("[OK] PDF 引擎: Chrome headless (--no-pdf-header-footer)")
+
     size_kb = os.path.getsize(args.output) / 1024
     print(f"[OK] PDF 已生成: {args.output} ({size_kb:.1f} KB)")
 
