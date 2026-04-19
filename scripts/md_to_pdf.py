@@ -201,9 +201,8 @@ a {
 """
 
 
-def md_to_html(md_text, title="深度分析报告", subtitle="深度研究报告",
-               meta_line="", author="微信公众号: 熵息茶馆"):
-    """将 Markdown 转为带封面的 HTML"""
+def md_to_html(md_text, title="深度分析报告", meta_line="", author="微信公众号: 熵息茶馆", qr_path=None):
+    """将 Markdown 转为带封面的 HTML，去除副标题和二维码"""
 
     # 用 markdown 库转换正文
     html_body = markdown.markdown(
@@ -220,24 +219,26 @@ def md_to_html(md_text, title="深度分析报告", subtitle="深度研究报告
             title = extracted_title
         html_body = html_body.replace(first_h1_match.group(0), '', 1)
 
-    # 替换 CSS 中的页眉占位符
-    css = CSS_TEMPLATE.replace("HEADER_TEXT", f"{title}  |  深度研究报告")
+    # 替换 CSS 中的页眉占位符（仅保留标题）
+    css = CSS_TEMPLATE.replace("HEADER_TEXT", title)
 
-    # 构建封面
+    # 构建封面（不含副标题，二维码放在作者下方）
+    qr_img_html = f"<img src='file://{qr_path}' style='margin-top:5mm; width:120px;'/>" if qr_path else ''
     cover_html = f"""
-    <div class="cover">
-        <h1 style="page-break-before: avoid; border: none;">{title}</h1>
-        <div class="subtitle">{subtitle}</div>
+    <div class=\"cover\">
+        <h1 style=\"page-break-before: avoid; border: none;\">{title}</h1>
         {"<div class='meta'>" + meta_line + "</div>" if meta_line else ""}
-        <hr class="divider">
-        <div class="meta">{author}</div>
+        <hr class=\"divider\">
+        <div class=\"meta\">{author}</div>
+        {qr_img_html}
     </div>
     """
 
-    full_html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
+    full_html = f"""
+<!DOCTYPE html>
+<html lang=\"zh-CN\">
 <head>
-    <meta charset="UTF-8">
+    <meta charset=\"UTF-8\">
     <style>{css}</style>
 </head>
 <body>
@@ -248,19 +249,20 @@ def md_to_html(md_text, title="深度分析报告", subtitle="深度研究报告
 
     return full_html
 
-
 def main():
     parser = argparse.ArgumentParser(description="深度分析法报告 Markdown → PDF")
     parser.add_argument("input", help="输入的 Markdown 文件路径")
     parser.add_argument("output", help="输出的 PDF 文件路径")
     parser.add_argument("--title", default=None, help="报告标题")
-    parser.add_argument("--author", default="微信公众号: 赏析茶馆", help="作者名")
+    parser.add_argument("--author", default="微信公众号: 熵息茶馆", help="作者名")
+    parser.add_argument("--subtitle", default=None, help="封面副标题（如研究时间|领域|对象类型）")
+    parser.add_argument("--qr", default=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "references", "shangxichaguan.png")), help="封面二维码图片路径（默认熵息茶馆二维码）")
     args = parser.parse_args()
 
     with open(args.input, "r", encoding="utf-8") as f:
         md_text = f.read()
 
-    # 提取元信息
+    # 提取元信息（用于封面副标题）
     meta_line = ""
     for line in md_text.split("\n"):
         stripped = line.strip().lstrip(">").strip()
@@ -268,7 +270,20 @@ def main():
             meta_line = stripped
             break
 
-    html = md_to_html(md_text, title=args.title or "深度分析报告", meta_line=meta_line, author=args.author)
+    # 从正文中移除元信息行，避免重复出现
+    if meta_line:
+        # 删除可能的 blockquote 前缀并去除整行
+        md_text_body = md_text.replace(f"> {meta_line}", "")
+    else:
+        md_text_body = md_text
+
+    html = md_to_html(
+        md_text_body,
+        title=args.title or "深度分析报告",
+        meta_line=meta_line,
+        author=args.author,
+        qr_path=args.qr,
+    )
 
     # 保存中间 HTML（便于调试）
     html_path = args.output.replace('.pdf', '.html')
